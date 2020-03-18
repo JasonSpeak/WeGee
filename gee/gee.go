@@ -1,34 +1,64 @@
 package gee
 
 import (
+	"log"
 	"net/http"
 )
 
 //HandlerFunc defines the request handler used by gee
 type HandlerFunc func(*Context)
 
+//RouterGroup defines group routers
+type RouterGroup struct {
+	prefix      string        //Group route
+	middlewares []HandlerFunc //Group middlewares
+	parent      *RouterGroup  //parent of current group
+	engine      *Engine       //engine of current group
+}
+
 //Engine implement the interface of ServeHTTP
 type Engine struct {
-	router *router
+	*RouterGroup                //inherit all functons of RouterGroup
+	router       *router        //router tree of this engine
+	groups       []*RouterGroup //All groups of this engine
 }
 
 //New is the constructor of gee.Engine
 func New() *Engine {
-	return &Engine{router: newRouter()}
+	engine := &Engine{router: newRouter()}
+	engine.RouterGroup = &RouterGroup{engine: engine}
+	engine.groups = []*RouterGroup{engine.RouterGroup}
+	return engine
 }
 
-func (engine *Engine) addRoute(method string, pattern string, handler HandlerFunc) {
-	engine.router.addRoute(method, pattern, handler)
+//Group is used to create a new RouterGroup
+//All groups share the same engine instance
+func (group *RouterGroup) Group(prefix string) *RouterGroup {
+	engine := group.engine
+	newGroup := &RouterGroup{
+		prefix: group.prefix + prefix,
+		parent: group,
+		engine: engine,
+	}
+
+	engine.groups = append(engine.groups, newGroup)
+	return newGroup
+}
+
+func (group *RouterGroup) addRoute(method string, comp string, handler HandlerFunc) {
+	pattern := group.prefix + comp
+	log.Printf("Route %4s - %s", method, pattern)
+	group.engine.router.addRoute(method, pattern, handler)
 }
 
 //GET defines the method to add GET request
-func (engine *Engine) GET(pattern string, handler HandlerFunc) {
-	engine.addRoute("GET", pattern, handler)
+func (group *RouterGroup) GET(pattern string, handler HandlerFunc) {
+	group.addRoute("GET", pattern, handler)
 }
 
 //POST defines the method to add POST request
-func (engine *Engine) POST(pattern string, handler HandlerFunc) {
-	engine.addRoute("POST", pattern, handler)
+func (group *RouterGroup) POST(pattern string, handler HandlerFunc) {
+	group.addRoute("POST", pattern, handler)
 }
 
 //Run defines the method to start a http server
