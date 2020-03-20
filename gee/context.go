@@ -9,7 +9,7 @@ import (
 //H defines a nick name for Json data
 type H map[string]interface{}
 
-//Context defines a data struct for gee http link
+//Context defines a data struct for gee http resquest
 type Context struct {
 	//http origin object
 	Writer http.ResponseWriter
@@ -20,6 +20,11 @@ type Context struct {
 	Params map[string]string
 	//response info
 	StatusCode int
+	//middleware
+	handlers []HandlerFunc //middlewares belong to current Context
+	index    int           //index of running middleware
+	//engine pointer
+	engine *Engine
 }
 
 func newContext(w http.ResponseWriter, req *http.Request) *Context {
@@ -28,6 +33,16 @@ func newContext(w http.ResponseWriter, req *http.Request) *Context {
 		Req:    req,
 		Path:   req.URL.Path,
 		Method: req.Method,
+		index:  -1,
+	}
+}
+
+//Next used to executed middlewares in order
+func (c *Context) Next() {
+	c.index++
+	length := len(c.handlers)
+	for ; c.index < length; c.index++ {
+		c.handlers[c.index](c)
 	}
 }
 
@@ -76,14 +91,22 @@ func (c *Context) Data(code int, data []byte) {
 }
 
 //HTML used to set html into current context
-func (c *Context) HTML(code int, html string) {
+func (c *Context) HTML(code int, name string, data interface{}) {
 	c.SetHeader("Content-Type", "text/html")
 	c.Status(code)
-	c.Writer.Write([]byte(html))
+	if err := c.engine.htmlTemplates.ExecuteTemplate(c.Writer, name, data); err != nil {
+		c.Fail(500, err.Error())
+	}
 }
 
 //Param used to get route parameter of current context
 func (c *Context) Param(key string) string {
 	value, _ := c.Params[key]
 	return value
+}
+
+//Fail used to return fail information
+func (c *Context) Fail(code int, err string) {
+	c.index = len(c.handlers)
+	c.JSON(code, H{"message": err})
 }

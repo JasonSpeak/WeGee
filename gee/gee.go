@@ -1,8 +1,11 @@
 package gee
 
 import (
+	"html/template"
 	"log"
 	"net/http"
+	"path"
+	"strings"
 )
 
 //HandlerFunc defines the request handler used by gee
@@ -18,9 +21,11 @@ type RouterGroup struct {
 
 //Engine implement the interface of ServeHTTP
 type Engine struct {
-	*RouterGroup                //inherit all functons of RouterGroup
-	router       *router        //router tree of this engine
-	groups       []*RouterGroup //All groups of this engine
+	*RouterGroup                     //inherit all functons of RouterGroup
+	router        *router            //router tree of this engine
+	groups        []*RouterGroup     //All groups of this engine
+	htmlTemplates *template.Template //for html render
+	funcMap       template.FuncMap   //for html render
 }
 
 //New is the constructor of gee.Engine
@@ -61,13 +66,64 @@ func (group *RouterGroup) POST(pattern string, handler HandlerFunc) {
 	group.addRoute("POST", pattern, handler)
 }
 
+//Use used to apply middlewares on groups
+func (group *RouterGroup) Use(middlewares ...HandlerFunc) {
+	group.middlewares = append(group.middlewares, middlewares...)
+}
+
+func (group *RouterGroup) createStaticHandler(relativePath string, fs http.FileSystem) HandlerFunc {
+	absolutePath := path.Join(group.prefix, relativePath)
+	fileServer := http.StripPrefix(absolutePath, http.FileServer(fs))
+	return func(c *Context) {
+		file := c.Param("filePath")
+		//check if file exists and/or if wehave permission to access it
+
+		if _, err := fs.Open(file); err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+
+		fileServer.ServeHTTP(c.Writer, c.Req)
+	}
+}
+
+//Static used to serve static files
+func (group *RouterGroup) Static(relativePath, root string) {
+	handler := group.createStaticHandler(relativePath, http.Dir(root))
+	urlPattern := path.Join(relativePath, "/*filePath")
+
+	//register GET handlers
+	group.GET(urlPattern, handler)
+}
+
 //Run defines the method to start a http server
 func (engine *Engine) Run(addr string) (err error) {
 	return http.ListenAndServe(addr, engine)
 }
 
+//SetFuncMap used to set funcMap for current engine
+func (engine *Engine) SetFuncMap(funcMap template.FuncMap) {
+	engine.funcMap = funcMap
+}
+
+//LoadHTMLGlob used to load html glob for current engine
+//将所有模板加载进内存
+func (engine *Engine) LoadHTMLGlob(pattern string) {
+	engine.htmlTemplates = template.Must(template.New("").Funcs(engine.funcMap).ParseGlob(pattern))
+}
+
 //ServeHTTP implement the request handler
+//添加所有的自定义模板渲染函数
 func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	var middlewares []HandlerFunc
+	for _, group := range engine.groups {
+		if strings.HasPrefix(req.URL.Path, group.prefix) {
+			middlewares = append(middlewares, group.middlewares...)
+		}
+	}
+
 	c := newContext(w, req)
+	c.handlers = middlewares
+	c.engine = engine
 	engine.router.handle(c)
 }
