@@ -10,4 +10,4 @@
 - [x] 实现分组控制Group  
 - [x] 实现中间件Middleware  
 - [x] 实现模板HTML Template  
-- [ ] 实现错误恢复Panic Recover  
+- [x] 实现错误恢复Panic Recover  
